@@ -22,10 +22,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build release workspace
-        run: cargo build --workspace --release --locked
+        run: cargo build --workspace --release
 
       - name: Run tests
-        run: cargo test --workspace --locked
+        run: cargo test --workspace
 
       - name: Package binaries
         run: |
