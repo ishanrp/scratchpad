@@ -346,7 +346,7 @@ fn card(object: &Object) -> gtk::Widget {
     spacer.set_hexpand(true);
     header.append(&spacer);
 
-    if !matches!(object.lifecycle, Lifecycle::Available) {
+    if !matches!(&object.lifecycle, Lifecycle::Available) {
         let lifecycle = gtk::Label::new(Some(lifecycle_name(&object.lifecycle)));
         lifecycle.add_css_class("state-badge");
         header.append(&lifecycle);
