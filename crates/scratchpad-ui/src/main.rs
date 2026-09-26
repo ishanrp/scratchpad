@@ -1,23 +1,58 @@
+mod cli;
 mod dnd;
 mod panel;
+mod service;
 
+use anyhow::Result;
+use clap::Parser;
 use gtk::glib;
 use gtk::prelude::*;
 use scratchpad_core::*;
 use std::{cell::RefCell, rc::Rc, time::Duration};
+
+#[derive(Parser, Debug)]
+#[command(name = "scratchpad")]
+#[command(about = "Persistent Wayland scratchpad")]
+struct Args {
+    #[command(subcommand)]
+    command: Option<cli::Command>,
+}
 
 struct ViewState {
     active: Option<uuid::Uuid>,
     signature: String,
 }
 
-fn main() {
+fn main() -> Result<()> {
+    let args = Args::parse();
+
+    match args.command {
+        Some(cli::Command::Serve) => service::run_headless(),
+        Some(command) => {
+            let request = cli::request(command)?;
+            let response = ipc(&Paths::discover(), request)?;
+            println!("{}", serde_json::to_string_pretty(&response)?);
+            Ok(())
+        }
+        None => run_ui(),
+    }
+}
+
+fn run_ui() -> Result<()> {
+    let paths = Paths::discover();
+    let _service = if service::socket_is_live(&paths.socket) {
+        None
+    } else {
+        Some(service::start_embedded()?)
+    };
+
     let app = gtk::Application::builder()
         .application_id("dev.systemscratchpad.Scratchpad")
         .build();
 
     app.connect_activate(build);
     app.run();
+    Ok(())
 }
 
 fn build(app: &gtk::Application) {
@@ -80,6 +115,7 @@ fn build(app: &gtk::Application) {
         state.clone(),
         panel_controller.clone(),
     );
+
     install_refresh_timer(
         &flow,
         state.clone(),
@@ -172,7 +208,7 @@ fn load_pages_and_items(
             }
         }
         _ => {
-            let label = gtk::Label::new(Some("Daemon offline"));
+            let label = gtk::Label::new(Some("Service unavailable"));
             label.add_css_class("warning-label");
             rail.append(&label);
         }
@@ -285,12 +321,12 @@ fn submit_object(
         }
         Ok(response) => {
             eprintln!(
-                "[scratchpad-ui] daemon rejected object: {response:?}"
+                "[scratchpad-ui] service rejected object: {response:?}"
             );
             false
         }
         Err(err) => {
-            eprintln!("[scratchpad-ui] daemon error: {err:#}");
+            eprintln!("[scratchpad-ui] service error: {err:#}");
             false
         }
     }
@@ -301,7 +337,7 @@ fn card(
     panel: panel::PanelController,
 ) -> gtk::Widget {
     let outer = gtk::Box::new(gtk::Orientation::Vertical, 10);
-    outer.set_width_request(300);
+    outer.set_width_request(360);
     outer.set_hexpand(true);
     outer.add_css_class("object-card");
 
@@ -325,6 +361,28 @@ fn card(
         header.append(&lifecycle);
     }
 
+    if matches!(object.kind, ObjectKind::Text | ObjectKind::Url) {
+        let label = if matches!(object.kind, ObjectKind::Url) {
+            "LINK"
+        } else {
+            "FILE"
+        };
+        let export = gtk::Label::new(Some(label));
+        export.add_css_class("drag-export-chip");
+        export.set_tooltip_text(Some(if matches!(object.kind, ObjectKind::Url) {
+            "Drag this handle when the destination expects a link/URI"
+        } else {
+            "Drag this handle when the destination expects a file"
+        }));
+        dnd::install_outbound(
+            &export,
+            object.clone(),
+            panel.clone(),
+            dnd::OutboundFlavor::Uri,
+        );
+        header.append(&export);
+    }
+
     outer.append(&header);
 
     match object.kind {
@@ -337,7 +395,7 @@ fn card(
                     ),
             ));
             body.set_wrap(true);
-            body.set_lines(6);
+            body.set_lines(8);
             body.set_xalign(0.0);
             body.set_yalign(0.0);
             body.add_css_class("text-preview");
@@ -364,7 +422,7 @@ fn card(
 
             let url_label = gtk::Label::new(Some(&url_text));
             url_label.set_wrap(true);
-            url_label.set_lines(3);
+            url_label.set_lines(4);
             url_label.set_xalign(0.0);
             url_label.add_css_class("url-preview");
             outer.append(&url_label);
@@ -413,7 +471,13 @@ fn card(
         outer.set_tooltip_text(Some(&tooltip));
     }
 
-    dnd::install_outbound(&outer, object.clone(), panel);
+    dnd::install_outbound(
+        &outer,
+        object.clone(),
+        panel,
+        dnd::OutboundFlavor::Content,
+    );
+
     outer.upcast()
 }
 
@@ -503,9 +567,9 @@ fn text_preview(object: &Object) -> Option<String> {
     object.representations.iter().find_map(|representation| {
         if let StorageRef::InlineText { text } = &representation.storage {
             let mut preview =
-                text.chars().take(420).collect::<String>();
+                text.chars().take(560).collect::<String>();
 
-            if text.chars().count() > 420 {
+            if text.chars().count() > 560 {
                 preview.push('…');
             }
 
@@ -614,7 +678,7 @@ fn install_css() {
 
         .scratchpad-panel {
             background: #121419;
-            padding: 12px;
+            padding: 14px;
         }
 
         .edge-hotspot {
@@ -631,25 +695,25 @@ fn install_css() {
         }
 
         .page-rail {
-            padding: 4px 8px 4px 2px;
+            padding: 4px 10px 4px 2px;
         }
 
         .page-dot {
-            min-width: 40px;
-            min-height: 40px;
+            min-width: 42px;
+            min-height: 42px;
             border-radius: 12px;
             background: #252a33;
         }
 
         .content-column {
-            padding-left: 4px;
+            padding-left: 6px;
         }
 
         .object-card {
             background: #1d2129;
             border: 1px solid #2b313d;
             border-radius: 16px;
-            padding: 14px;
+            padding: 16px;
             margin: 2px;
         }
 
@@ -670,13 +734,25 @@ fn install_css() {
             opacity: 0.68;
         }
 
+        .drag-export-chip {
+            font-size: 10px;
+            font-weight: 700;
+            padding: 3px 7px;
+            border-radius: 8px;
+            background: rgba(115, 145, 255, 0.14);
+        }
+
+        .drag-export-chip:hover {
+            background: rgba(115, 145, 255, 0.28);
+        }
+
         .text-preview {
             font-size: 16px;
             color: #eef1f6;
         }
 
         .url-domain {
-            font-size: 16px;
+            font-size: 17px;
             font-weight: 700;
             color: #eef1f6;
         }

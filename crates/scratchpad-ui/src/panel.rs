@@ -1,3 +1,4 @@
+use gtk::gdk::prelude::*;
 use gtk::glib;
 use gtk::prelude::*;
 use scratchpad_core::Paths;
@@ -63,13 +64,21 @@ pub fn build(window: &gtk::ApplicationWindow) -> PanelShell {
     window.set_decorated(false);
     window.set_resizable(false);
 
-    // The layer surface never changes size after mapping. For a side panel it is
-    // always MAX_PANEL_EXTENT wide and stretched vertically by opposite anchors.
-    // Hide/reveal is implemented with GdkSurface input regions, not remapping.
+    // Keep one mapped surface for the lifetime of the UI. Hyprland reported a
+    // 960x200 surface when we relied on opposite-edge stretching, so size the
+    // long axis explicitly from the actual monitor geometry after mapping.
+    // These fallback values avoid a tiny natural-size surface before the first
+    // monitor geometry callback.
     if edge.is_vertical() {
-        window.set_default_size(max_panel_extent(), 0);
+        window.set_default_size(
+            max_panel_extent(),
+            fallback_monitor_height(),
+        );
     } else {
-        window.set_default_size(0, max_panel_extent());
+        window.set_default_size(
+            fallback_monitor_width(),
+            max_panel_extent(),
+        );
     }
 
     let root = gtk::Overlay::new();
@@ -168,9 +177,13 @@ pub fn build(window: &gtk::ApplicationWindow) -> PanelShell {
     {
         let controller = controller.clone();
         window.connect_map(move |_| {
-            // Wait until the GdkSurface has its compositor allocation.
+            // Wait until the GdkSurface has a monitor, then explicitly match
+            // the long axis to that output's application-pixel geometry.
             let controller = controller.clone();
-            glib::idle_add_local_once(move || controller.apply_input_region());
+            glib::idle_add_local_once(move || {
+                controller.fit_surface_to_monitor();
+                controller.apply_input_region();
+            });
         });
     }
 
@@ -268,6 +281,48 @@ impl PanelController {
         apply_panel_extent(&self.panel, self.edge, extent);
         save_panel_extent(self.edge, extent);
         self.apply_input_region();
+    }
+
+    fn fit_surface_to_monitor(&self) {
+        let Some(surface) = self.window.surface() else {
+            return;
+        };
+        let display = surface.display();
+        let Some(monitor) = display.monitor_at_surface(&surface) else {
+            return;
+        };
+        let geometry = monitor.geometry();
+
+        if self.edge.is_vertical() {
+            self.window.set_default_size(
+                max_panel_extent(),
+                geometry.height(),
+            );
+        } else {
+            self.window.set_default_size(
+                geometry.width(),
+                max_panel_extent(),
+            );
+        }
+
+        if panel_debug() {
+            eprintln!(
+                "[scratchpad-panel] monitor={}x{} scale={} requested_surface={}x{}",
+                geometry.width(),
+                geometry.height(),
+                monitor.scale_factor(),
+                if self.edge.is_vertical() {
+                    max_panel_extent()
+                } else {
+                    geometry.width()
+                },
+                if self.edge.is_vertical() {
+                    geometry.height()
+                } else {
+                    max_panel_extent()
+                }
+            );
+        }
     }
 
     fn apply_input_region(&self) {
@@ -440,26 +495,25 @@ fn configure_layer_shell(window: &gtk::ApplicationWindow, edge: PanelEdge) {
     window.set_layer(Layer::Top);
     window.set_exclusive_zone(0);
 
+    // Anchor to one corner and size the long axis explicitly. The previous
+    // opposite-edge stretch path produced a 200px-high layer surface on the
+    // tested Hyprland setup despite the documented stretch semantics.
     match edge {
         PanelEdge::Left => {
             window.set_anchor(Edge::Left, true);
             window.set_anchor(Edge::Top, true);
-            window.set_anchor(Edge::Bottom, true);
         }
         PanelEdge::Right => {
             window.set_anchor(Edge::Right, true);
             window.set_anchor(Edge::Top, true);
-            window.set_anchor(Edge::Bottom, true);
         }
         PanelEdge::Top => {
             window.set_anchor(Edge::Top, true);
             window.set_anchor(Edge::Left, true);
-            window.set_anchor(Edge::Right, true);
         }
         PanelEdge::Bottom => {
             window.set_anchor(Edge::Bottom, true);
             window.set_anchor(Edge::Left, true);
-            window.set_anchor(Edge::Right, true);
         }
     }
 }
@@ -490,7 +544,7 @@ fn load_panel_extent(edge: PanelEdge) -> i32 {
     std::fs::read_to_string(panel_extent_path(edge))
         .ok()
         .and_then(|s| s.trim().parse::<i32>().ok())
-        .unwrap_or(if edge.is_vertical() { 430 } else { 360 })
+        .unwrap_or(if edge.is_vertical() { 560 } else { 420 })
         .clamp(min_panel_extent(), max_panel_extent())
 }
 
@@ -515,6 +569,22 @@ fn collapse_ms() -> u64 {
         .ok()
         .and_then(|x| x.parse().ok())
         .unwrap_or(350)
+}
+
+fn fallback_monitor_width() -> i32 {
+    std::env::var("SCRATCHPAD_FALLBACK_MONITOR_WIDTH")
+        .ok()
+        .and_then(|x| x.parse().ok())
+        .unwrap_or(1920)
+        .max(640)
+}
+
+fn fallback_monitor_height() -> i32 {
+    std::env::var("SCRATCHPAD_FALLBACK_MONITOR_HEIGHT")
+        .ok()
+        .and_then(|x| x.parse().ok())
+        .unwrap_or(1080)
+        .max(480)
 }
 
 fn min_panel_extent() -> i32 {

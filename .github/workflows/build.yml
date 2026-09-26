@@ -47,18 +47,16 @@ jobs:
       - name: Run release tests
         run: cargo test --workspace --release
 
-      - name: Package binaries
+      - name: Package binary
         run: |
           mkdir -p dist
-          cp target/release/scratchpad-daemon dist/
-          cp target/release/scratchpad dist/scratchpad-cli
-          cp target/release/scratchpad-ui dist/
-          chmod +x dist/*
+          cp target/release/scratchpad dist/
+          chmod +x dist/scratchpad
 
-      - name: Upload Linux binaries
+      - name: Upload Linux binary
         uses: actions/upload-artifact@v4
         with:
           name: scratchpad-linux-x86_64
-          path: dist/
+          path: dist/scratchpad
           if-no-files-found: error
           compression-level: 0

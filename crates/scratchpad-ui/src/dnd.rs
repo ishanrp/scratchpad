@@ -13,6 +13,12 @@ enum DropKind {
     Text,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutboundFlavor {
+    Content,
+    Uri,
+}
+
 pub fn install_inbound(
     root: &gtk::Overlay,
     panel: PanelController,
@@ -25,8 +31,6 @@ pub fn install_inbound(
         "text/x-moz-url",
     ]);
 
-    // Start broad. ::accept narrows actions per drop before GTK's built-in
-    // drag-enter/drag-motion handlers negotiate status with GDK.
     let target = gtk::DropTargetAsync::new(
         Some(formats),
         gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE,
@@ -37,10 +41,6 @@ pub fn install_inbound(
             return false;
         };
 
-        // File/URI drops stay COPY-only. Text may also accept MOVE because
-        // Chromium/Wayland sometimes advertises selected text as MOVE-only.
-        // We never implement our own drag-enter/motion status negotiation;
-        // GTK's default handler handles that correctly.
         let actions = match kind {
             DropKind::UriList => gtk::gdk::DragAction::COPY,
             DropKind::Text => {
@@ -72,12 +72,6 @@ pub fn install_inbound(
 
             let final_action = choose_final_action(kind, drop.actions());
             if final_action.is_empty() {
-                if dnd_debug() {
-                    eprintln!(
-                        "[scratchpad-dnd] drop rejected: negotiated actions {:?} incompatible with {kind:?}",
-                        drop.actions()
-                    );
-                }
                 return false;
             }
 
@@ -132,25 +126,26 @@ pub fn install_inbound(
     root.add_controller(target);
 }
 
-pub fn install_outbound(
-    widget: &gtk::Box,
+pub fn install_outbound<W: IsA<gtk::Widget>>(
+    widget: &W,
     object: Object,
     panel: PanelController,
+    flavor: OutboundFlavor,
 ) {
     let source = gtk::DragSource::new();
     source.set_actions(gtk::gdk::DragAction::COPY);
 
     source.connect_prepare(move |_, _, _| {
-        let provider = drag_provider(&object);
+        let provider = drag_provider(&object, flavor);
         if dnd_debug() {
             match &provider {
                 Some(provider) => eprintln!(
-                    "[scratchpad-dnd] outbound prepare object={} formats={}",
+                    "[scratchpad-dnd] outbound prepare object={} flavor={flavor:?} formats={}",
                     object.id,
                     provider.formats().to_str()
                 ),
                 None => eprintln!(
-                    "[scratchpad-dnd] outbound prepare object={} no-provider",
+                    "[scratchpad-dnd] outbound prepare object={} flavor={flavor:?} no-provider",
                     object.id
                 ),
             }
@@ -406,36 +401,49 @@ fn object_from_uri(uri: &str) -> Option<Object> {
     )
 }
 
-fn drag_provider(object: &Object) -> Option<gtk::gdk::ContentProvider> {
-    let mut providers = Vec::new();
+fn drag_provider(
+    object: &Object,
+    flavor: OutboundFlavor,
+) -> Option<gtk::gdk::ContentProvider> {
+    match flavor {
+        OutboundFlavor::Content => match object.kind {
+            ObjectKind::Text | ObjectKind::Url => {
+                semantic_text(object).map(text_provider)
+            }
+            _ => uri_provider(object),
+        },
+        OutboundFlavor::Uri => uri_provider(object),
+    }
+}
 
-    if let Some(text) = full_text(object) {
-        providers.push(bytes_provider(
+fn text_provider(text: String) -> gtk::gdk::ContentProvider {
+    let providers = [
+        bytes_provider(
             "text/plain;charset=utf-8",
             text.as_bytes().to_vec(),
-        ));
-        providers.push(bytes_provider("text/plain", text.as_bytes().to_vec()));
-    }
+        ),
+        bytes_provider(
+            "text/plain",
+            text.as_bytes().to_vec(),
+        ),
+    ];
+    gtk::gdk::ContentProvider::new_union(&providers)
+}
 
-    if let Some(uri) = outbound_uri(object) {
-        providers.push(bytes_provider(
-            "text/uri-list",
-            format!("{uri}\r\n").into_bytes(),
-        ));
-    } else if let Some(text) = full_text(object) {
-        if let Some(uri) = materialize_text_export(object, &text) {
-            providers.push(bytes_provider(
-                "text/uri-list",
-                format!("{uri}\r\n").into_bytes(),
-            ));
-        }
-    }
+fn uri_provider(object: &Object) -> Option<gtk::gdk::ContentProvider> {
+    let uri = outbound_uri(object).or_else(|| {
+        full_text(object)
+            .and_then(|text| materialize_text_export(object, &text))
+    })?;
 
-    match providers.len() {
-        0 => None,
-        1 => providers.pop(),
-        _ => Some(gtk::gdk::ContentProvider::new_union(&providers)),
-    }
+    Some(bytes_provider(
+        "text/uri-list",
+        format!("{uri}\r\n").into_bytes(),
+    ))
+}
+
+fn semantic_text(object: &Object) -> Option<String> {
+    full_text(object).or_else(|| primary_uri(object))
 }
 
 fn bytes_provider(mime: &str, data: Vec<u8>) -> gtk::gdk::ContentProvider {

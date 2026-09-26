@@ -2,8 +2,6 @@
 members = [
   "crates/scratchpad-core",
   "crates/scratchpad-storage",
-  "crates/scratchpad-daemon",
-  "crates/scratchpad-cli",
   "crates/scratchpad-ui",
 ]
 resolver = "2"

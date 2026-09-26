@@ -1,5 +1,5 @@
 [package]
-name="scratchpad-ui"
+name="scratchpad"
 version.workspace=true
 edition.workspace=true
 rust-version.workspace=true
@@ -11,9 +11,12 @@ layer-shell=["dep:gtk4-layer-shell"]
 
 [dependencies]
 anyhow.workspace=true
+clap.workspace=true
 gtk={package="gtk4",version="0.11.5",features=["v4_6"]}
 gtk4-layer-shell={version="0.8.1",optional=true}
 scratchpad-core={path="../scratchpad-core"}
+scratchpad-storage={path="../scratchpad-storage"}
 serde_json.workspace=true
+tokio.workspace=true
 url.workspace=true
 uuid.workspace=true
