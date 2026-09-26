@@ -1,6 +1,7 @@
 mod dnd;
 mod panel;
 
+use gtk::glib;
 use gtk::prelude::*;
 use scratchpad_core::*;
 use std::{cell::RefCell, rc::Rc, time::Duration};
