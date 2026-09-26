@@ -1131,7 +1131,6 @@ fn install_css() {
 
         .page-rail {
             min-width: 38px;
-            max-width: 44px;
             background: #0c0e13;
             border-radius: 12px;
             padding: 7px 3px;
