@@ -229,7 +229,7 @@ fn build(app: &gtk::Application) {
 
     let grid = gtk::FlowBox::new();
     grid.set_selection_mode(gtk::SelectionMode::None);
-    grid.set_min_children_per_line(2);
+    grid.set_min_children_per_line(1);
     grid.set_max_children_per_line(4);
     grid.set_row_spacing(12);
     grid.set_column_spacing(12);
