@@ -45,12 +45,24 @@ impl PanelEdge {
     }
 }
 
-#[derive(Default)]
 struct UiState {
     active: Option<uuid::Uuid>,
     signature: String,
     drag_active: bool,
     collapse_timer: Option<glib::SourceId>,
+    panel_extent: i32,
+}
+
+impl UiState {
+    fn new(edge: PanelEdge) -> Self {
+        Self {
+            active: None,
+            signature: String::new(),
+            drag_active: false,
+            collapse_timer: None,
+            panel_extent: load_panel_extent(edge),
+        }
+    }
 }
 
 fn main() {
@@ -63,7 +75,7 @@ fn main() {
 
 fn build(app: &gtk::Application) {
     let edge = PanelEdge::from_env();
-    let state = Rc::new(RefCell::new(UiState::default()));
+    let state = Rc::new(RefCell::new(UiState::new(edge)));
 
     let win = gtk::ApplicationWindow::builder()
         .application(app)
@@ -87,12 +99,39 @@ fn build(app: &gtk::Application) {
         hotspot.set_hexpand(true);
     }
 
-    let panel = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    let panel = gtk::Box::new(edge.root_orientation(), 0);
     panel.add_css_class("scratchpad-panel");
+    panel.set_hexpand(true);
+    panel.set_vexpand(true);
+
+    let panel_body = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    panel_body.set_hexpand(true);
+    panel_body.set_vexpand(true);
+
+    let resize_handle = gtk::Box::new(
+        if edge.is_vertical_panel() {
+            gtk::Orientation::Vertical
+        } else {
+            gtk::Orientation::Horizontal
+        },
+        0,
+    );
+    resize_handle.add_css_class("resize-handle");
     if edge.is_vertical_panel() {
-        panel.set_width_request(panel_width());
+        resize_handle.set_width_request(7);
+        resize_handle.set_vexpand(true);
     } else {
-        panel.set_height_request(panel_height());
+        resize_handle.set_height_request(7);
+        resize_handle.set_hexpand(true);
+    }
+
+    {
+        let extent = state.borrow().panel_extent;
+        if edge.is_vertical_panel() {
+            panel.set_width_request(extent);
+        } else {
+            panel.set_height_request(extent);
+        }
     }
 
     let rail = gtk::Box::new(gtk::Orientation::Vertical, 6);
@@ -125,8 +164,21 @@ fn build(app: &gtk::Application) {
     scroll.set_vexpand(true);
     content.append(&scroll);
 
-    panel.append(&rail);
-    panel.append(&content);
+    panel_body.append(&rail);
+    panel_body.append(&content);
+
+    match edge {
+        PanelEdge::Right | PanelEdge::Bottom => {
+            panel.append(&resize_handle);
+            panel.append(&panel_body);
+        }
+        PanelEdge::Left | PanelEdge::Top => {
+            panel.append(&panel_body);
+            panel.append(&resize_handle);
+        }
+    }
+
+    install_resize_handle(&win, &panel, &resize_handle, state.clone(), edge);
 
     if edge.hotspot_first() {
         root.append(&hotspot);
@@ -145,7 +197,7 @@ fn build(app: &gtk::Application) {
     install_refresh_timer(&flow, state.clone());
 
     panel.set_visible(false);
-    set_window_revealed(&win, edge, false);
+    set_window_revealed(&win, edge, false, state.borrow().panel_extent);
     win.present();
 
     if std::env::var_os("SCRATCHPAD_START_OPEN").is_some() {
@@ -221,7 +273,7 @@ fn reveal_panel(
 
     if !panel.is_visible() {
         panel.set_visible(true);
-        set_window_revealed(win, edge, true);
+        set_window_revealed(win, edge, true, state.borrow().panel_extent);
         win.queue_resize();
     }
 }
@@ -251,34 +303,144 @@ fn schedule_collapse(
             return;
         }
         panel.set_visible(false);
-        set_window_revealed(&win, edge, false);
+        set_window_revealed(&win, edge, false, state.panel_extent);
         win.queue_resize();
     });
 
     state.borrow_mut().collapse_timer = Some(id);
 }
 
-fn set_window_revealed(win: &gtk::ApplicationWindow, edge: PanelEdge, revealed: bool) {
+fn set_window_revealed(
+    win: &gtk::ApplicationWindow,
+    edge: PanelEdge,
+    revealed: bool,
+    panel_extent: i32,
+) {
     match edge {
         PanelEdge::Left | PanelEdge::Right => {
             let width = if revealed {
-                panel_width() + edge_width()
+                panel_extent + edge_width()
             } else {
                 edge_width()
             };
-            // Height is ignored because the layer surface is anchored top+bottom.
+            // Height is compositor-controlled because the layer surface is anchored top+bottom.
             win.set_default_size(width, 1);
         }
         PanelEdge::Top | PanelEdge::Bottom => {
             let height = if revealed {
-                panel_height() + edge_width()
+                panel_extent + edge_width()
             } else {
                 edge_width()
             };
-            // Width is ignored because the layer surface is anchored left+right.
+            // Width is compositor-controlled because the layer surface is anchored left+right.
             win.set_default_size(1, height);
         }
     }
+}
+
+
+fn install_resize_handle(
+    win: &gtk::ApplicationWindow,
+    panel: &gtk::Box,
+    handle: &gtk::Box,
+    state: Rc<RefCell<UiState>>,
+    edge: PanelEdge,
+) {
+    let gesture = gtk::GestureDrag::new();
+    let start_extent = Rc::new(RefCell::new(0_i32));
+
+    {
+        let start_extent = start_extent.clone();
+        let state = state.clone();
+        gesture.connect_drag_begin(move |_, _, _| {
+            *start_extent.borrow_mut() = state.borrow().panel_extent;
+        });
+    }
+
+    {
+        let start_extent = start_extent.clone();
+        let state = state.clone();
+        let panel = panel.clone();
+        let win = win.clone();
+
+        gesture.connect_drag_update(move |_, dx, dy| {
+            let start = *start_extent.borrow();
+            let delta = match edge {
+                PanelEdge::Right => -dx,
+                PanelEdge::Left => dx,
+                PanelEdge::Bottom => -dy,
+                PanelEdge::Top => dy,
+            };
+
+            let extent = (start as f64 + delta)
+                .round()
+                .clamp(min_panel_extent() as f64, max_panel_extent() as f64)
+                as i32;
+
+            state.borrow_mut().panel_extent = extent;
+
+            if edge.is_vertical_panel() {
+                panel.set_width_request(extent);
+            } else {
+                panel.set_height_request(extent);
+            }
+
+            set_window_revealed(&win, edge, true, extent);
+            win.queue_resize();
+        });
+    }
+
+    {
+        let state = state.clone();
+        gesture.connect_drag_end(move |_, _, _| {
+            save_panel_extent(edge, state.borrow().panel_extent);
+        });
+    }
+
+    handle.add_controller(gesture);
+}
+
+fn panel_extent_path(edge: PanelEdge) -> PathBuf {
+    let name = if edge.is_vertical_panel() {
+        "panel-width"
+    } else {
+        "panel-height"
+    };
+    Paths::discover().data_dir.join(name)
+}
+
+fn load_panel_extent(edge: PanelEdge) -> i32 {
+    let env_value = if edge.is_vertical_panel() {
+        std::env::var("SCRATCHPAD_PANEL_WIDTH").ok()
+    } else {
+        std::env::var("SCRATCHPAD_PANEL_HEIGHT").ok()
+    };
+
+    if let Some(value) = env_value.and_then(|x| x.parse::<i32>().ok()) {
+        return value.clamp(min_panel_extent(), max_panel_extent());
+    }
+
+    std::fs::read_to_string(panel_extent_path(edge))
+        .ok()
+        .and_then(|s| s.trim().parse::<i32>().ok())
+        .unwrap_or(if edge.is_vertical_panel() { 430 } else { 360 })
+        .clamp(min_panel_extent(), max_panel_extent())
+}
+
+fn save_panel_extent(edge: PanelEdge, extent: i32) {
+    let path = panel_extent_path(edge);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(path, extent.to_string());
+}
+
+fn min_panel_extent() -> i32 {
+    280
+}
+
+fn max_panel_extent() -> i32 {
+    960
 }
 
 fn load_pages_and_items(
@@ -413,6 +575,35 @@ fn install_drop_target(
             );
         }
         accepted
+    });
+
+    target.connect_drag_enter(|_, drop, _, _| {
+        if dnd_debug() {
+            eprintln!(
+                "[scratchpad-dnd] drag-enter actions={:?} formats={}",
+                drop.actions(),
+                drop.formats().to_str()
+            );
+        }
+        if drop.actions().contains(gtk::gdk::DragAction::COPY) {
+            gtk::gdk::DragAction::COPY
+        } else {
+            gtk::gdk::DragAction::empty()
+        }
+    });
+
+    target.connect_drag_motion(|_, drop, _, _| {
+        if drop.actions().contains(gtk::gdk::DragAction::COPY) {
+            gtk::gdk::DragAction::COPY
+        } else {
+            gtk::gdk::DragAction::empty()
+        }
+    });
+
+    target.connect_drag_leave(|_, _| {
+        if dnd_debug() {
+            eprintln!("[scratchpad-dnd] drag-leave");
+        }
     });
 
     {
@@ -1050,20 +1241,6 @@ fn mime_for_path(path: &Path) -> String {
     .into()
 }
 
-fn panel_width() -> i32 {
-    std::env::var("SCRATCHPAD_PANEL_WIDTH")
-        .ok()
-        .and_then(|x| x.parse().ok())
-        .unwrap_or(430)
-}
-
-fn panel_height() -> i32 {
-    std::env::var("SCRATCHPAD_PANEL_HEIGHT")
-        .ok()
-        .and_then(|x| x.parse().ok())
-        .unwrap_or(360)
-}
-
 fn edge_width() -> i32 {
     std::env::var("SCRATCHPAD_EDGE_WIDTH")
         .ok()
@@ -1156,6 +1333,15 @@ fn install_css() {
         }
         .edge-hotspot {
             background: rgba(115, 145, 255, 0.24);
+        }
+        .resize-handle {
+            background: transparent;
+        }
+        .resize-handle:hover {
+            background: rgba(115, 145, 255, 0.35);
+        }
+        .scratchpad-root:drop(active) .scratchpad-panel {
+            background: #161a21;
         }
         .page-rail {
             padding: 4px 8px 4px 2px;
