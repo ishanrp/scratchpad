@@ -1158,7 +1158,6 @@ fn install_css() {
             border-left-style: solid;
             border-radius: 4px 11px 11px 4px;
             background: #171a22;
-            transition: 120ms ease;
         }
 
         .page-tag:hover {
@@ -1221,7 +1220,7 @@ fn install_css() {
 
         .workspace-title {
             font-size: 20px;
-            font-weight: 760;
+            font-weight: 700;
             color: #edf0f6;
         }
 
@@ -1244,7 +1243,6 @@ fn install_css() {
             border-radius: 13px;
             padding: 11px 12px;
             margin: 1px;
-            transition: 120ms ease;
         }
 
         .object-card:hover {
@@ -1266,8 +1264,7 @@ fn install_css() {
 
         .type-badge {
             font-size: 9px;
-            font-weight: 760;
-            letter-spacing: 0.8px;
+            font-weight: 700;
             opacity: 0.62;
         }
 
@@ -1279,7 +1276,7 @@ fn install_css() {
 
         .drag-export-chip {
             font-size: 9px;
-            font-weight: 760;
+            font-weight: 700;
             padding: 2px 6px;
             border-radius: 7px;
             background: rgba(115, 145, 255, 0.13);
@@ -1308,7 +1305,7 @@ fn install_css() {
 
         .url-domain {
             font-size: 15px;
-            font-weight: 760;
+            font-weight: 700;
             color: #f1f4f8;
         }
 
@@ -1324,7 +1321,7 @@ fn install_css() {
 
         .object-title {
             font-size: 13px;
-            font-weight: 680;
+            font-weight: 700;
             color: #edf0f5;
         }
 
@@ -1341,12 +1338,12 @@ fn install_css() {
         }
 
         .undo-button {
-            font-weight: 740;
+            font-weight: 700;
             color: #9eb8ff;
         }
 
         .popover-title {
-            font-weight: 720;
+            font-weight: 700;
         }
         "#,
     );
