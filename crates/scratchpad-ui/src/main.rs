@@ -178,8 +178,9 @@ fn build(app: &gtk::Application) {
     let shell = panel::build(&window);
     let panel_controller = shell.controller.clone();
 
-    let rail = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    rail.set_width_request(86);
+    let rail = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    rail.set_width_request(44);
+    rail.set_hexpand(false);
     rail.set_vexpand(true);
     rail.add_css_class("page-rail");
 
@@ -329,32 +330,41 @@ impl Ui {
     }
 
     fn page_tag(self: &Rc<Self>, page: Page) -> gtk::Widget {
-        let tag = gtk::Box::new(gtk::Orientation::Horizontal, 1);
+        let tag = gtk::Overlay::new();
         tag.add_css_class("page-tag");
         tag.add_css_class(page_color_class(page.id));
+        tag.set_tooltip_text(Some(&page.name));
 
         if self.state.borrow().active == Some(page.id) {
             tag.add_css_class("active");
         }
 
-        let label = gtk::Label::new(Some(&page.name));
-        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        label.set_max_width_chars(8);
-        label.set_xalign(0.0);
+        let initial = page
+            .name
+            .chars()
+            .find(|ch| !ch.is_whitespace())
+            .map(|ch| ch.to_uppercase().collect::<String>())
+            .unwrap_or_else(|| "?".into());
+
+        let label = gtk::Label::new(Some(&initial));
+        label.set_width_chars(1);
+        label.set_xalign(0.5);
+        label.add_css_class("page-tag-letter");
 
         let button = gtk::Button::new();
         button.set_child(Some(&label));
-        button.set_hexpand(true);
         button.set_tooltip_text(Some(&page.name));
         button.add_css_class("flat");
         button.add_css_class("page-tag-main");
-        tag.append(&button);
+        tag.set_child(Some(&button));
 
         let close = gtk::Button::from_icon_name("window-close-symbolic");
         close.set_tooltip_text(Some("Delete tab"));
+        close.set_halign(gtk::Align::End);
+        close.set_valign(gtk::Align::Start);
         close.add_css_class("flat");
         close.add_css_class("tab-close");
-        tag.append(&close);
+        tag.add_overlay(&close);
 
         {
             let ui = self.clone();
@@ -701,33 +711,6 @@ impl Ui {
             header.append(&lifecycle);
         }
 
-        if matches!(object.kind, ObjectKind::Text | ObjectKind::Url) {
-            let label = if matches!(object.kind, ObjectKind::Url) {
-                "LINK"
-            } else {
-                "FILE"
-            };
-
-            let export = gtk::Label::new(Some(label));
-            export.add_css_class("drag-export-chip");
-            export.set_tooltip_text(Some(
-                if matches!(object.kind, ObjectKind::Url) {
-                    "Drag as link / URI"
-                } else {
-                    "Drag as a text file"
-                },
-            ));
-
-            dnd::install_outbound(
-                &export,
-                object.clone(),
-                self.panel.clone(),
-                dnd::OutboundFlavor::Uri,
-            );
-
-            header.append(&export);
-        }
-
         let delete = gtk::Button::from_icon_name("window-close-symbolic");
         delete.set_tooltip_text(Some("Remove from this tab"));
         delete.add_css_class("flat");
@@ -825,22 +808,27 @@ impl Ui {
             }
         }
 
-        let tooltip = object
+        let formats = object
             .representations
             .iter()
             .map(|representation| representation.mime_type.as_str())
             .collect::<Vec<_>>()
             .join("\n");
 
-        if !tooltip.is_empty() {
-            outer.set_tooltip_text(Some(&tooltip));
-        }
+        let tooltip = if formats.is_empty() {
+            "Drag: native/file form\nCtrl+drag: plain text".to_string()
+        } else {
+            format!(
+                "Drag: native/file form\nCtrl+drag: plain text\n\n{}",
+                formats
+            )
+        };
+        outer.set_tooltip_text(Some(&tooltip));
 
         dnd::install_outbound(
             &outer,
             object,
             self.panel.clone(),
-            dnd::OutboundFlavor::Content,
         );
 
         outer.upcast()
@@ -1142,9 +1130,11 @@ fn install_css() {
         }
 
         .page-rail {
+            min-width: 38px;
+            max-width: 44px;
             background: #0c0e13;
-            border-radius: 14px;
-            padding: 8px 6px;
+            border-radius: 12px;
+            padding: 7px 3px;
         }
 
         .tab-scroll,
@@ -1153,10 +1143,11 @@ fn install_css() {
         }
 
         .page-tag {
-            min-height: 38px;
+            min-width: 34px;
+            min-height: 42px;
             border-left-width: 4px;
             border-left-style: solid;
-            border-radius: 4px 11px 11px 4px;
+            border-radius: 4px 10px 10px 4px;
             background: #171a22;
         }
 
@@ -1165,33 +1156,38 @@ fn install_css() {
         }
 
         .page-tag.active {
-            background: #272c38;
-            margin-right: 0;
+            background: #2a303d;
         }
 
         .page-tag-main {
-            min-height: 36px;
-            padding: 0 4px 0 7px;
-            font-size: 12px;
-            font-weight: 650;
+            min-width: 32px;
+            min-height: 40px;
+            padding: 0;
+        }
+
+        .page-tag-letter {
+            font-size: 13px;
+            font-weight: 700;
         }
 
         .tab-close {
-            min-width: 20px;
-            min-height: 20px;
+            min-width: 14px;
+            min-height: 14px;
             padding: 0;
-            opacity: 0.12;
+            margin: 1px;
+            opacity: 0;
         }
 
         .page-tag:hover .tab-close,
-        .page-tag.active .tab-close {
-            opacity: 0.82;
+        .page-tag.active:hover .tab-close {
+            opacity: 0.86;
         }
 
         .add-tab {
-            min-width: 34px;
-            min-height: 34px;
-            border-radius: 11px;
+            min-width: 32px;
+            min-height: 32px;
+            padding: 0;
+            border-radius: 10px;
             opacity: 0.72;
         }
 
@@ -1272,19 +1268,6 @@ fn install_css() {
             font-size: 9px;
             font-weight: 700;
             opacity: 0.64;
-        }
-
-        .drag-export-chip {
-            font-size: 9px;
-            font-weight: 700;
-            padding: 2px 6px;
-            border-radius: 7px;
-            background: rgba(115, 145, 255, 0.13);
-            opacity: 0.46;
-        }
-
-        .object-card:hover .drag-export-chip {
-            opacity: 0.9;
         }
 
         .card-delete {
