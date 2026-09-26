@@ -41,14 +41,10 @@ pub fn install_inbound(
             return false;
         };
 
-        let actions = match kind {
-            DropKind::UriList => gtk::gdk::DragAction::COPY,
-            DropKind::Text => {
-                gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE
-            }
-        };
-        target.set_actions(actions);
-
+        // Keep COPY|MOVE advertised during negotiation. Dolphin can begin a
+        // file drag as MOVE-only; narrowing the target to COPY here prevents
+        // GTK from ever delivering the drop. We still enforce non-destructive
+        // file semantics when finishing the transfer below.
         if dnd_debug() {
             eprintln!(
                 "[scratchpad-dnd] accept kind={kind:?} source_actions={:?} target_actions={:?} formats={}",
@@ -70,16 +66,17 @@ pub fn install_inbound(
                 return false;
             };
 
-            let final_action = choose_final_action(kind, drop.actions());
-            if final_action.is_empty() {
+            let decision = choose_drop_decision(kind, drop.actions());
+            if decision.transport_action.is_empty() {
                 return false;
             }
 
             if dnd_debug() {
                 eprintln!(
-                    "[scratchpad-dnd] drop start kind={kind:?} negotiated={:?} final={:?}",
+                    "[scratchpad-dnd] drop start kind={kind:?} negotiated={:?} transport={:?} finish={:?}",
                     drop.actions(),
-                    final_action
+                    decision.transport_action,
+                    decision.finish_action
                 );
             }
 
@@ -110,11 +107,23 @@ pub fn install_inbound(
                     }
                 };
 
-                drop.finish(if accepted {
-                    final_action
+                let finish = if accepted {
+                    decision.finish_action
                 } else {
                     gtk::gdk::DragAction::empty()
-                });
+                };
+
+                if accepted
+                    && kind == DropKind::UriList
+                    && finish.is_empty()
+                    && dnd_debug()
+                {
+                    eprintln!(
+                        "[scratchpad-dnd] imported MOVE-only file drop without acknowledging MOVE; source is preserved"
+                    );
+                }
+
+                drop.finish(finish);
 
                 panel.set_drag_active(false);
             });
@@ -208,19 +217,44 @@ fn classify_drop(drop: &gtk::gdk::Drop) -> Option<DropKind> {
     None
 }
 
-fn choose_final_action(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DropDecision {
+    // Action needed to let GTK deliver the drop.
+    transport_action: gtk::gdk::DragAction,
+    // Action acknowledged to the source after bytes are persisted.
+    // NONE deliberately reports failure for MOVE-only file drags so a file
+    // manager must not remove the original source.
+    finish_action: gtk::gdk::DragAction,
+}
+
+fn choose_drop_decision(
     kind: DropKind,
     actions: gtk::gdk::DragAction,
-) -> gtk::gdk::DragAction {
+) -> DropDecision {
     if actions.contains(gtk::gdk::DragAction::COPY) {
-        return gtk::gdk::DragAction::COPY;
+        return DropDecision {
+            transport_action: gtk::gdk::DragAction::COPY,
+            finish_action: gtk::gdk::DragAction::COPY,
+        };
     }
 
-    if kind == DropKind::Text && actions.contains(gtk::gdk::DragAction::MOVE) {
-        return gtk::gdk::DragAction::MOVE;
+    if actions.contains(gtk::gdk::DragAction::MOVE) {
+        return match kind {
+            DropKind::Text => DropDecision {
+                transport_action: gtk::gdk::DragAction::MOVE,
+                finish_action: gtk::gdk::DragAction::MOVE,
+            },
+            DropKind::UriList => DropDecision {
+                transport_action: gtk::gdk::DragAction::MOVE,
+                finish_action: gtk::gdk::DragAction::empty(),
+            },
+        };
     }
 
-    gtk::gdk::DragAction::empty()
+    DropDecision {
+        transport_action: gtk::gdk::DragAction::empty(),
+        finish_action: gtk::gdk::DragAction::empty(),
+    }
 }
 
 async fn read_foreign_drop(
@@ -568,29 +602,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn uri_move_is_never_accepted() {
-        assert!(choose_final_action(
+    fn uri_move_is_transport_only_and_never_acknowledged() {
+        let decision = choose_drop_decision(
             DropKind::UriList,
+            gtk::gdk::DragAction::MOVE,
+        );
+        assert_eq!(
+            decision.transport_action,
             gtk::gdk::DragAction::MOVE
-        )
-        .is_empty());
+        );
+        assert!(decision.finish_action.is_empty());
     }
 
     #[test]
-    fn uri_prefers_copy() {
+    fn uri_prefers_safe_copy() {
+        let decision = choose_drop_decision(
+            DropKind::UriList,
+            gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE,
+        );
         assert_eq!(
-            choose_final_action(
-                DropKind::UriList,
-                gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE
-            ),
+            decision.finish_action,
             gtk::gdk::DragAction::COPY
         );
     }
 
     #[test]
-    fn text_can_accept_move_only_sources() {
+    fn text_can_acknowledge_move_only_sources() {
+        let decision = choose_drop_decision(
+            DropKind::Text,
+            gtk::gdk::DragAction::MOVE,
+        );
         assert_eq!(
-            choose_final_action(DropKind::Text, gtk::gdk::DragAction::MOVE),
+            decision.finish_action,
             gtk::gdk::DragAction::MOVE
         );
     }
