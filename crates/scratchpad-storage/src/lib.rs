@@ -488,3 +488,70 @@ impl BlobStore {
         self.root.join(&digest[..2]).join(&digest[2..])
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn page_and_placement_undo_round_trip() -> Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "scratchpad-storage-test-{}",
+            Uuid::new_v4()
+        ));
+        let db = root.join("scratchpad.db");
+
+        {
+            let repo = Repository::open(&db)?;
+            let inbox = repo
+                .list_pages()?
+                .into_iter()
+                .next()
+                .context("missing default page")?;
+
+            let page = repo.create_page("Task")?;
+            let object = Object::new(
+                ObjectKind::Text,
+                Some("Undo me".into()),
+                SourceDescriptor::Cli,
+            )
+            .with_representation(
+                "text/plain;charset=utf-8",
+                RepresentationRole::Primary,
+                StorageRef::InlineText {
+                    text: "Undo me".into(),
+                },
+                Some(7),
+            );
+
+            repo.insert_object(&object, Some(page.id), None)?;
+
+            let snapshot = repo.page_snapshot(page.id)?;
+            assert_eq!(snapshot.items.len(), 1);
+
+            let placement = snapshot.items[0].1.clone();
+            repo.remove_placement(page.id, object.id)?;
+            assert!(repo.page_snapshot(page.id)?.items.is_empty());
+
+            repo.restore_placement(&placement)?;
+            assert_eq!(repo.page_snapshot(page.id)?.items.len(), 1);
+
+            let snapshot = repo.page_snapshot(page.id)?;
+            repo.delete_page(page.id)?;
+            assert!(repo.page_snapshot(page.id).is_err());
+
+            // The final remaining task tab is protected from deletion.
+            assert!(repo.delete_page(inbox.id).is_err());
+
+            repo.restore_page(&snapshot)?;
+            assert_eq!(repo.page_snapshot(page.id)?.items.len(), 1);
+
+            repo.rename_page(page.id, "Renamed task")?;
+            assert_eq!(repo.page_snapshot(page.id)?.page.name, "Renamed task");
+        }
+
+        let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+}
