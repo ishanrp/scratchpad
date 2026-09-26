@@ -64,8 +64,6 @@ async fn serve_with_ready(
     std::fs::create_dir_all(&paths.runtime_dir)?;
 
     if paths.socket.exists() {
-        // A stale Unix socket is common after an unclean shutdown. Only remove
-        // it if nothing is listening.
         if std::os::unix::net::UnixStream::connect(&paths.socket).is_ok() {
             if let Some(ready) = ready {
                 let _ = ready.send(Err(anyhow::anyhow!(
@@ -75,6 +73,7 @@ async fn serve_with_ready(
             }
             anyhow::bail!("service already running");
         }
+
         std::fs::remove_file(&paths.socket)?;
     }
 
@@ -94,6 +93,7 @@ async fn serve_with_ready(
     loop {
         let (stream, _) = listener.accept().await?;
         let repo = repo.clone();
+
         tokio::spawn(async move {
             if let Err(err) = handle(stream, repo).await {
                 eprintln!("[scratchpad-service] client error: {err:#}");
@@ -135,14 +135,29 @@ fn dispatch(
     let result: anyhow::Result<Response> = (|| {
         Ok(match request {
             Request::Ping => Response::Pong,
+
             Request::ListPages => Response::Pages(repo.list_pages()?),
             Request::CreatePage { name } => {
                 let page = repo.create_page(&name)?;
                 Response::Created { id: page.id }
             }
+            Request::RenamePage { page_id, name } => {
+                repo.rename_page(page_id, &name)?;
+                Response::Updated
+            }
+            Request::DeletePage { page_id } => {
+                repo.delete_page(page_id)?;
+                Response::Removed
+            }
+            Request::RestorePage { snapshot } => {
+                let id = snapshot.page.id;
+                repo.restore_page(&snapshot)?;
+                Response::Created { id }
+            }
             Request::GetPage { page_id } => {
                 Response::Page(repo.page_snapshot(page_id)?)
             }
+
             Request::AddObject {
                 object,
                 page_id,
@@ -156,6 +171,18 @@ fn dispatch(
                 )?;
                 Response::Created { id }
             }
+            Request::RemovePlacement {
+                page_id,
+                object_id,
+            } => {
+                repo.remove_placement(page_id, object_id)?;
+                Response::Removed
+            }
+            Request::RestorePlacement { placement } => {
+                repo.restore_placement(&placement)?;
+                Response::Updated
+            }
+
             Request::ListObjects { limit } => {
                 Response::Objects(repo.list_objects(limit)?)
             }
