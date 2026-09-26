@@ -1,5 +1,6 @@
 use crate::panel::PanelController;
 use gtk::gio::prelude::*;
+use gtk::glib;
 use gtk::prelude::*;
 use scratchpad_core::*;
 use std::{path::{Path, PathBuf}, rc::Rc};

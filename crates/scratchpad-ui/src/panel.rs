@@ -1,3 +1,4 @@
+use gtk::glib;
 use gtk::prelude::*;
 use scratchpad_core::Paths;
 use std::{cell::RefCell, path::PathBuf, rc::Rc, time::Duration};
