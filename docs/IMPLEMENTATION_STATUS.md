@@ -14,7 +14,9 @@
 - Browser text/URL inbound DnD
 - File/URI inbound DnD
 - Outbound semantic-vs-URI drag affordances
-- Page hover switching
+- Dynamic task tabs: create, rename, delete with undo, and drag-hover switching
+- Scrollable adaptive 2–4 column stamp grid with type-color accents
+- Hover-only item removal with placement-level undo
 - Basic text/URL/path ingestion
 - Plugin manifest/capability model
 - GitHub Actions release build/tests/artifact
@@ -27,6 +29,10 @@
 - panel GDK input regions correctly change between hidden and revealed widths
 
 ## Still requires runtime validation
+
+- dynamic tab create/rename/delete/undo interaction on Hyprland
+- stamp-grid wrapping and scrolling across narrow/wide panel sizes
+- item remove/undo without disturbing shared objects on other tabs
 
 - monitor-sized side surface on the user's actual output after explicit `GdkMonitor::geometry()` sizing
 - new card-body plain-text drag into text editors
