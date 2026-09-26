@@ -49,7 +49,7 @@ fn build(app: &gtk::Application) {
     let scroll = gtk::ScrolledWindow::new();
     let flow = gtk::FlowBox::new();
     flow.set_selection_mode(gtk::SelectionMode::None);
-    flow.set_max_children_per_line(3);
+    flow.set_max_children_per_line(1);
     flow.set_row_spacing(10);
     flow.set_column_spacing(10);
     flow.set_valign(gtk::Align::Start);
@@ -332,47 +332,112 @@ fn submit_object(
 }
 
 fn card(object: &Object) -> gtk::Widget {
-    let box_ = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    box_.set_width_request(210);
-    box_.set_height_request(138);
-    box_.add_css_class("object-card");
+    let outer = gtk::Box::new(gtk::Orientation::Vertical, 10);
+    outer.set_width_request(300);
+    outer.set_hexpand(true);
+    outer.add_css_class("object-card");
 
-    let icon = gtk::Label::new(Some(icon_for(&object.kind)));
-    icon.add_css_class("preview-icon");
-    box_.append(&icon);
+    let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    let badge = gtk::Label::new(Some(&kind_name(&object.kind).to_ascii_uppercase()));
+    badge.add_css_class("type-badge");
+    header.append(&badge);
 
-    let title = gtk::Label::new(Some(object.title.as_deref().unwrap_or("Untitled")));
-    title.set_wrap(true);
-    title.set_xalign(0.0);
-    title.add_css_class("heading");
-    box_.append(&title);
+    let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    spacer.set_hexpand(true);
+    header.append(&spacer);
 
-    if let Some(preview) = text_preview(object) {
-        let preview = gtk::Label::new(Some(&preview));
-        preview.set_wrap(true);
-        preview.set_lines(3);
-        preview.set_xalign(0.0);
-        preview.add_css_class("preview-text");
-        box_.append(&preview);
+    if !matches!(object.lifecycle, Lifecycle::Available) {
+        let lifecycle = gtk::Label::new(Some(lifecycle_name(&object.lifecycle)));
+        lifecycle.add_css_class("state-badge");
+        header.append(&lifecycle);
     }
 
-    let meta = gtk::Label::new(Some(&format!(
-        "{} • {} repr",
-        kind_name(&object.kind),
-        object.representations.len()
-    )));
-    meta.set_xalign(0.0);
-    meta.add_css_class("dim-label");
-    box_.append(&meta);
+    outer.append(&header);
 
-    box_.upcast()
+    match object.kind {
+        ObjectKind::Text => {
+            let body = gtk::Label::new(Some(
+                text_preview(object)
+                    .as_deref()
+                    .unwrap_or(object.title.as_deref().unwrap_or("Empty text")),
+            ));
+            body.set_wrap(true);
+            body.set_lines(6);
+            body.set_xalign(0.0);
+            body.set_yalign(0.0);
+            body.add_css_class("text-preview");
+            outer.append(&body);
+        }
+        ObjectKind::Url => {
+            let url_text = primary_uri(object)
+                .or_else(|| text_preview(object))
+                .unwrap_or_else(|| object.title.clone().unwrap_or_default());
+            let domain = url::Url::parse(&url_text)
+                .ok()
+                .and_then(|u| u.host_str().map(ToOwned::to_owned))
+                .unwrap_or_else(|| "Link".into());
+
+            let domain_label = gtk::Label::new(Some(&domain));
+            domain_label.set_xalign(0.0);
+            domain_label.add_css_class("url-domain");
+            outer.append(&domain_label);
+
+            let url_label = gtk::Label::new(Some(&url_text));
+            url_label.set_wrap(true);
+            url_label.set_lines(3);
+            url_label.set_xalign(0.0);
+            url_label.add_css_class("url-preview");
+            outer.append(&url_label);
+        }
+        _ => {
+            let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+
+            let icon = gtk::Label::new(Some(icon_for(&object.kind)));
+            icon.add_css_class("compact-icon");
+            row.append(&icon);
+
+            let details = gtk::Box::new(gtk::Orientation::Vertical, 4);
+            details.set_hexpand(true);
+
+            let title = gtk::Label::new(Some(object.title.as_deref().unwrap_or("Untitled")));
+            title.set_wrap(true);
+            title.set_lines(3);
+            title.set_xalign(0.0);
+            title.add_css_class("object-title");
+            details.append(&title);
+
+            if let Some(path) = external_path(object) {
+                let secondary = gtk::Label::new(Some(&path));
+                secondary.set_wrap(true);
+                secondary.set_lines(2);
+                secondary.set_xalign(0.0);
+                secondary.add_css_class("secondary-text");
+                details.append(&secondary);
+            }
+
+            row.append(&details);
+            outer.append(&row);
+        }
+    }
+
+    let tooltip = object
+        .representations
+        .iter()
+        .map(|r| r.mime_type.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !tooltip.is_empty() {
+        outer.set_tooltip_text(Some(&tooltip));
+    }
+
+    outer.upcast()
 }
 
 fn text_preview(object: &Object) -> Option<String> {
     object.representations.iter().find_map(|representation| {
         if let StorageRef::InlineText { text } = &representation.storage {
-            let mut preview = text.chars().take(180).collect::<String>();
-            if text.chars().count() > 180 {
+            let mut preview = text.chars().take(420).collect::<String>();
+            if text.chars().count() > 420 {
                 preview.push('…');
             }
             Some(preview)
@@ -380,6 +445,31 @@ fn text_preview(object: &Object) -> Option<String> {
             None
         }
     })
+}
+
+fn primary_uri(object: &Object) -> Option<String> {
+    object.representations.iter().find_map(|representation| match &representation.storage {
+        StorageRef::Uri { uri } => Some(uri.clone()),
+        _ => None,
+    })
+}
+
+fn external_path(object: &Object) -> Option<String> {
+    object.representations.iter().find_map(|representation| match &representation.storage {
+        StorageRef::ExternalPath { path } => Some(path.clone()),
+        _ => None,
+    })
+}
+
+fn lifecycle_name(lifecycle: &Lifecycle) -> &'static str {
+    match lifecycle {
+        Lifecycle::Available => "READY",
+        Lifecycle::Changed => "CHANGED",
+        Lifecycle::Missing => "MISSING",
+        Lifecycle::PermissionDenied => "NO ACCESS",
+        Lifecycle::Offline => "OFFLINE",
+        Lifecycle::MovedKnown => "MOVED",
+    }
 }
 
 fn install_hover_switch(
@@ -573,7 +663,7 @@ fn page_glyph(name: &str) -> String {
 fn install_css() {
     let provider = gtk::CssProvider::new();
     provider.load_from_data(
-        ".scratchpad{background:#15171c;padding:10px}         .page-rail{padding:6px}         .page-dot{min-width:38px;min-height:38px;border-radius:12px}         .object-card{background:#222630;border-radius:14px;padding:12px}         .preview-icon{font-size:28px}         .preview-text{opacity:.85}         .dim-label{opacity:.65}",
+        ".scratchpad{background:#121419;padding:12px}         .page-rail{padding:4px 8px 4px 2px}         .page-dot{min-width:40px;min-height:40px;border-radius:12px;background:#252a33}         .object-card{background:#1d2129;border:1px solid #2b313d;border-radius:16px;padding:14px;margin:2px;box-shadow:0 3px 10px rgba(0,0,0,.22)}         .object-card:hover{background:#222731;border-color:#3a4352}         .type-badge{font-size:10px;font-weight:700;letter-spacing:1px;opacity:.62}         .state-badge{font-size:9px;font-weight:700;opacity:.68}         .text-preview{font-size:16px;line-height:1.35;color:#eef1f6}         .url-domain{font-size:16px;font-weight:700;color:#eef1f6}         .url-preview{font-size:12px;opacity:.68}         .compact-icon{font-size:23px;min-width:34px;opacity:.78}         .object-title{font-size:15px;font-weight:650;color:#eef1f6}         .secondary-text{font-size:11px;opacity:.58}         .dim-label{opacity:.58}",
     );
     gtk::style_context_add_provider_for_display(
         &gtk::gdk::Display::default().unwrap(),
