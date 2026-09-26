@@ -1,0 +1,16 @@
+[package]
+name="scratchpad-ui"
+version.workspace=true
+edition.workspace=true
+rust-version.workspace=true
+license.workspace=true
+[features]
+default=["layer-shell"]
+layer-shell=["dep:gtk4-layer-shell"]
+[dependencies]
+anyhow.workspace=true
+gtk={package="gtk4",version="0.11.5"}
+gtk4-layer-shell={version="0.8.1",optional=true}
+scratchpad-core={path="../scratchpad-core"}
+serde_json.workspace=true
+uuid.workspace=true

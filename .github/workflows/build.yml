@@ -1,0 +1,43 @@
+name: build-and-test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+
+    steps:
+      - name: Install build dependencies
+        run: pacman -Syu --noconfirm git rust gtk4 gtk4-layer-shell sqlite pkgconf
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build release workspace
+        run: cargo build --workspace --release --locked
+
+      - name: Run tests
+        run: cargo test --workspace --locked
+
+      - name: Package binaries
+        run: |
+          mkdir -p dist
+          cp target/release/scratchpad-daemon dist/
+          cp target/release/scratchpad dist/scratchpad-cli
+          cp target/release/scratchpad-ui dist/
+          chmod +x dist/*
+
+      - name: Upload Linux binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: scratchpad-linux-x86_64
+          path: dist/
+          if-no-files-found: error

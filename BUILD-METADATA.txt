@@ -1,0 +1,4 @@
+commit: 55d57fece26d99dabdca1153bdc84ef692257d6e
+created_utc: 2026-09-26T19:19:35Z
+validation: TOML parsed; Rust delimiters balanced; source structurally inspected
+compile_status: not compiled in this execution environment (Rust toolchain/native GTK dev packages unavailable)
