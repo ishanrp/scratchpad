@@ -9,23 +9,43 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: "1"
+  CARGO_TERM_COLOR: always
+
 jobs:
   build:
     runs-on: ubuntu-latest
     container: archlinux:base-devel
+    timeout-minutes: 20
 
     steps:
-      - name: Install build dependencies
-        run: pacman -Syu --noconfirm git rust gtk4 gtk4-layer-shell sqlite pkgconf
+      - name: Install native build dependencies
+        run: pacman -Syu --noconfirm --needed git rust gtk4 gtk4-layer-shell pkgconf
 
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Restore Cargo and target cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: rust-arch-${{ runner.arch }}-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            rust-arch-${{ runner.arch }}-
+
       - name: Build release workspace
         run: cargo build --workspace --release
 
-      - name: Run tests
-        run: cargo test --workspace
+      - name: Run release tests
+        run: cargo test --workspace --release
 
       - name: Package binaries
         run: |
@@ -41,3 +61,4 @@ jobs:
           name: scratchpad-linux-x86_64
           path: dist/
           if-no-files-found: error
+          compression-level: 0
