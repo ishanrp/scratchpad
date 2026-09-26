@@ -81,13 +81,17 @@ fn build(app: &gtk::Application) {
         .application(app)
         .title("Scratchpad")
         .decorated(false)
-        .resizable(false)
+        .resizable(true)
         .build();
 
     configure_shell(&win, edge);
 
     let root = gtk::Box::new(edge.root_orientation(), 0);
     root.add_css_class("scratchpad-root");
+    root.set_hexpand(true);
+    root.set_vexpand(true);
+    root.set_halign(gtk::Align::Fill);
+    root.set_valign(gtk::Align::Fill);
 
     let hotspot = gtk::Box::new(gtk::Orientation::Vertical, 0);
     hotspot.add_css_class("edge-hotspot");
@@ -103,10 +107,14 @@ fn build(app: &gtk::Application) {
     panel.add_css_class("scratchpad-panel");
     panel.set_hexpand(true);
     panel.set_vexpand(true);
+    panel.set_halign(gtk::Align::Fill);
+    panel.set_valign(gtk::Align::Fill);
 
     let panel_body = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     panel_body.set_hexpand(true);
     panel_body.set_vexpand(true);
+    panel_body.set_halign(gtk::Align::Fill);
+    panel_body.set_valign(gtk::Align::Fill);
 
     let resize_handle = gtk::Box::new(
         if edge.is_vertical_panel() {
@@ -138,11 +146,15 @@ fn build(app: &gtk::Application) {
 
     let rail = gtk::Box::new(gtk::Orientation::Vertical, 6);
     rail.set_width_request(58);
+    rail.set_vexpand(true);
+    rail.set_valign(gtk::Align::Fill);
     rail.add_css_class("page-rail");
 
     let content = gtk::Box::new(gtk::Orientation::Vertical, 10);
     content.set_hexpand(true);
     content.set_vexpand(true);
+    content.set_halign(gtk::Align::Fill);
+    content.set_valign(gtk::Align::Fill);
 
     let header = gtk::Label::new(Some("Scratchpad"));
     header.set_xalign(0.0);
@@ -163,7 +175,10 @@ fn build(app: &gtk::Application) {
     flow.set_valign(gtk::Align::Start);
     flow.set_hexpand(true);
     scroll.set_child(Some(&flow));
+    scroll.set_hexpand(true);
     scroll.set_vexpand(true);
+    scroll.set_halign(gtk::Align::Fill);
+    scroll.set_valign(gtk::Align::Fill);
     content.append(&scroll);
 
     panel_body.append(&rail);
@@ -558,7 +573,7 @@ fn install_drop_target(
     ]);
     let target = gtk::DropTargetAsync::new(
         Some(formats),
-        gtk::gdk::DragAction::COPY,
+        gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE,
     );
 
     target.connect_accept(|_, drop| {
