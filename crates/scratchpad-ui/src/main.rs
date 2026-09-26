@@ -1255,7 +1255,9 @@ fn install_css() {
         }
 
         .object-card:hover {
-            filter: brightness(1.08);
+            border-top-color: #596579;
+            border-right-color: #596579;
+            border-bottom-color: #596579;
         }
 
         .type-text {
