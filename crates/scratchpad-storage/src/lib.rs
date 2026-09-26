@@ -393,7 +393,7 @@ impl Repository {
             "SELECT object_id,x,y,width,height,z_index,pinned
              FROM page_items
              WHERE page_id=?1
-             ORDER BY z_index, rowid",
+             ORDER BY z_index DESC, rowid DESC",
         )?;
 
         let rows = statement
