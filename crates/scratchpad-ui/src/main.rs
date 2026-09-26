@@ -235,8 +235,9 @@ fn build(app: &gtk::Application) {
     grid.set_row_spacing(12);
     grid.set_column_spacing(12);
     grid.set_valign(gtk::Align::Start);
+    grid.set_halign(gtk::Align::Start);
     grid.set_hexpand(true);
-    grid.set_homogeneous(true);
+    grid.set_homogeneous(false);
     grid.add_css_class("stamp-grid");
 
     scroll.set_child(Some(&grid));
@@ -685,9 +686,11 @@ impl Ui {
         placement: Placement,
     ) -> gtk::Widget {
         let outer = gtk::Box::new(gtk::Orientation::Vertical, 8);
-        outer.set_size_request(196, 152);
-        outer.set_hexpand(true);
-        outer.set_vexpand(true);
+        outer.set_size_request(210, 156);
+        outer.set_hexpand(false);
+        outer.set_vexpand(false);
+        outer.set_halign(gtk::Align::Start);
+        outer.set_valign(gtk::Align::Start);
         outer.add_css_class("object-card");
         outer.add_css_class(type_class(&object.kind));
 
@@ -741,6 +744,9 @@ impl Ui {
                         ),
                 ));
                 body.set_wrap(true);
+                body.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+                body.set_width_chars(24);
+                body.set_max_width_chars(24);
                 body.set_lines(4);
                 body.set_ellipsize(gtk::pango::EllipsizeMode::End);
                 body.set_xalign(0.0);
@@ -763,6 +769,8 @@ impl Ui {
                     .unwrap_or_else(|| "Link".into());
 
                 let domain_label = gtk::Label::new(Some(&domain));
+                domain_label.set_width_chars(24);
+                domain_label.set_max_width_chars(24);
                 domain_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
                 domain_label.set_xalign(0.0);
                 domain_label.add_css_class("url-domain");
@@ -770,6 +778,9 @@ impl Ui {
 
                 let url_label = gtk::Label::new(Some(&url_text));
                 url_label.set_wrap(true);
+                url_label.set_wrap_mode(gtk::pango::WrapMode::Char);
+                url_label.set_width_chars(24);
+                url_label.set_max_width_chars(24);
                 url_label.set_lines(2);
                 url_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
                 url_label.set_xalign(0.0);
@@ -789,6 +800,9 @@ impl Ui {
                     object.title.as_deref().unwrap_or("Untitled"),
                 ));
                 title.set_wrap(true);
+                title.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+                title.set_width_chars(22);
+                title.set_max_width_chars(22);
                 title.set_lines(2);
                 title.set_ellipsize(gtk::pango::EllipsizeMode::End);
                 title.set_xalign(0.5);
@@ -1230,38 +1244,84 @@ fn install_css() {
         }
 
         .object-card {
-            min-width: 196px;
-            min-height: 152px;
+            min-width: 210px;
+            min-height: 156px;
             background: #1a1e27;
             border: 1px solid #2a303c;
-            border-top-width: 3px;
+            border-left-width: 5px;
             border-radius: 13px;
             padding: 11px 12px;
             margin: 1px;
         }
 
         .object-card:hover {
-            background: #202530;
-            border-color: #3a4352;
+            filter: brightness(1.08);
         }
 
-        .type-text { border-top-color: #8a96a8; }
-        .type-url { border-top-color: #67aaf9; background: #19202b; }
-        .type-image { border-top-color: #ad7cf6; background: #201b29; }
-        .type-video { border-top-color: #ec945c; background: #241d1a; }
-        .type-audio { border-top-color: #61bd82; background: #19241f; }
-        .type-pdf { border-top-color: #e86f6f; background: #261b1d; }
-        .type-file { border-top-color: #9ba4b4; }
-        .type-folder { border-top-color: #d6a94f; background: #252118; }
-        .type-app { border-top-color: #4fb6a8; background: #172421; }
-        .type-tool { border-top-color: #64c2c8; background: #172326; }
-        .type-unknown { border-top-color: #7f8795; }
+        .type-text {
+            border-left-color: #a7b0c0;
+            background: #232730;
+        }
+        .type-url {
+            border-left-color: #5ea9ff;
+            background: #18283a;
+        }
+        .type-image {
+            border-left-color: #b785ff;
+            background: #281d36;
+        }
+        .type-video {
+            border-left-color: #f29a5c;
+            background: #332116;
+        }
+        .type-audio {
+            border-left-color: #63c98b;
+            background: #173025;
+        }
+        .type-pdf {
+            border-left-color: #f06f78;
+            background: #351c22;
+        }
+        .type-file {
+            border-left-color: #aab3c2;
+            background: #242832;
+        }
+        .type-folder {
+            border-left-color: #e0b14f;
+            background: #342b16;
+        }
+        .type-app {
+            border-left-color: #53c0b0;
+            background: #18302c;
+        }
+        .type-tool {
+            border-left-color: #62c7d0;
+            background: #173039;
+        }
+        .type-unknown {
+            border-left-color: #8791a2;
+            background: #23262d;
+        }
 
         .type-badge {
             font-size: 9px;
             font-weight: 700;
-            opacity: 0.62;
+            padding: 2px 6px;
+            border-radius: 7px;
+            opacity: 0.96;
         }
+
+        .type-text .type-badge { background: rgba(167,176,192,0.18); }
+        .type-url .type-badge { background: rgba(94,169,255,0.20); }
+        .type-image .type-badge { background: rgba(183,133,255,0.20); }
+        .type-video .type-badge { background: rgba(242,154,92,0.20); }
+        .type-audio .type-badge { background: rgba(99,201,139,0.20); }
+        .type-pdf .type-badge { background: rgba(240,111,120,0.20); }
+        .type-file .type-badge { background: rgba(170,179,194,0.18); }
+        .type-folder .type-badge { background: rgba(224,177,79,0.22); }
+        .type-app .type-badge { background: rgba(83,192,176,0.20); }
+        .type-tool .type-badge { background: rgba(98,199,208,0.20); }
+        .type-unknown .type-badge { background: rgba(135,145,162,0.18); }
 
         .state-badge {
             font-size: 9px;
