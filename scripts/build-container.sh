@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
-docker build -t system-scratchpad-build .
-id=$(docker create system-scratchpad-build)
-mkdir -p dist
-docker cp "$id:/src/target/release/scratchpad-daemon" dist/
-docker cp "$id:/src/target/release/scratchpad-ui" dist/
-docker cp "$id:/src/target/release/scratchpad" dist/scratchpad-cli
-docker rm "$id" >/dev/null
+
+IMAGE="${1:-system-scratchpad-build}"
+OUT="${2:-dist}"
+
+docker build -t "$IMAGE" .
+id="$(docker create "$IMAGE")"
+trap 'docker rm -f "$id" >/dev/null 2>&1 || true' EXIT
+
+rm -rf "$OUT"
+mkdir -p "$OUT"
+docker cp "$id:/dist/scratchpad" "$OUT/scratchpad"
+printf 'Built %s/scratchpad\n' "$OUT"
