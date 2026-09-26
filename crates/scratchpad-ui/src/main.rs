@@ -118,11 +118,13 @@ fn build(app: &gtk::Application) {
     );
     resize_handle.add_css_class("resize-handle");
     if edge.is_vertical_panel() {
-        resize_handle.set_width_request(7);
+        resize_handle.set_width_request(10);
         resize_handle.set_vexpand(true);
+        resize_handle.set_cursor_from_name(Some("col-resize"));
     } else {
-        resize_handle.set_height_request(7);
+        resize_handle.set_height_request(10);
         resize_handle.set_hexpand(true);
+        resize_handle.set_cursor_from_name(Some("row-resize"));
     }
 
     {
@@ -323,8 +325,9 @@ fn set_window_revealed(
             } else {
                 edge_width()
             };
-            // Height is compositor-controlled because the layer surface is anchored top+bottom.
-            win.set_default_size(width, 1);
+            // For layer-shell, an axis anchored on both sides must request 0
+            // to stretch to the compositor-provided output extent.
+            win.set_default_size(width, 0);
         }
         PanelEdge::Top | PanelEdge::Bottom => {
             let height = if revealed {
@@ -332,8 +335,9 @@ fn set_window_revealed(
             } else {
                 edge_width()
             };
-            // Width is compositor-controlled because the layer surface is anchored left+right.
-            win.set_default_size(1, height);
+            // For layer-shell, an axis anchored on both sides must request 0
+            // to stretch to the compositor-provided output extent.
+            win.set_default_size(0, height);
         }
     }
 }
@@ -578,27 +582,19 @@ fn install_drop_target(
     });
 
     target.connect_drag_enter(|_, drop, _, _| {
+        let action = negotiated_drop_action(drop);
         if dnd_debug() {
             eprintln!(
-                "[scratchpad-dnd] drag-enter actions={:?} formats={}",
+                "[scratchpad-dnd] drag-enter actions={:?} chosen={:?} formats={}",
                 drop.actions(),
+                action,
                 drop.formats().to_str()
             );
         }
-        if drop.actions().contains(gtk::gdk::DragAction::COPY) {
-            gtk::gdk::DragAction::COPY
-        } else {
-            gtk::gdk::DragAction::empty()
-        }
+        action
     });
 
-    target.connect_drag_motion(|_, drop, _, _| {
-        if drop.actions().contains(gtk::gdk::DragAction::COPY) {
-            gtk::gdk::DragAction::COPY
-        } else {
-            gtk::gdk::DragAction::empty()
-        }
-    });
+    target.connect_drag_motion(|_, drop, _, _| negotiated_drop_action(drop));
 
     target.connect_drag_leave(|_, _| {
         if dnd_debug() {
@@ -613,6 +609,14 @@ fn install_drop_target(
         let state = state.clone();
 
         target.connect_drop(move |_, drop, _, _| {
+            let negotiated_action = negotiated_drop_action(drop);
+            if negotiated_action.is_empty() {
+                if dnd_debug() {
+                    eprintln!("[scratchpad-dnd] drop rejected: no compatible action");
+                }
+                return false;
+            }
+
             state.borrow_mut().drag_active = true;
             reveal_panel(&win, &panel, &state, edge);
 
@@ -642,7 +646,7 @@ fn install_drop_target(
                 };
 
                 drop.finish(if accepted {
-                    gtk::gdk::DragAction::COPY
+                    negotiated_action
                 } else {
                     gtk::gdk::DragAction::empty()
                 });
@@ -656,6 +660,31 @@ fn install_drop_target(
     }
 
     root.add_controller(target);
+}
+
+fn negotiated_drop_action(drop: &gtk::gdk::Drop) -> gtk::gdk::DragAction {
+    let actions = drop.actions();
+    if actions.contains(gtk::gdk::DragAction::COPY) {
+        return gtk::gdk::DragAction::COPY;
+    }
+
+    // Chromium/Wayland commonly exposes selected text as MOVE-only. Treating
+    // that as an inbound import is safe for Scratchpad's database because we
+    // never delete or mutate the source ourselves. Do not accept MOVE-only
+    // file URI drops here; those remain COPY-only until the file-manager
+    // interoperability matrix is complete.
+    let formats = drop.formats();
+    let has_uri_list = formats.contain_mime_type("text/uri-list");
+    let has_text = formats.contain_mime_type("text/plain;charset=utf-8")
+        || formats.contain_mime_type("text/plain")
+        || formats.contain_mime_type("text/html")
+        || formats.contain_mime_type("text/x-moz-url");
+
+    if actions.contains(gtk::gdk::DragAction::MOVE) && has_text && !has_uri_list {
+        gtk::gdk::DragAction::MOVE
+    } else {
+        gtk::gdk::DragAction::empty()
+    }
 }
 
 async fn read_foreign_drop(
@@ -992,13 +1021,37 @@ fn install_drag_source(widget: &gtk::Box, object: Object) {
         if dnd_debug() {
             if let Some(provider) = &provider {
                 eprintln!(
-                    "[scratchpad-dnd] outbound object={} formats={}",
+                    "[scratchpad-dnd] outbound prepare object={} formats={}",
                     object.id,
                     provider.formats().to_str()
+                );
+            } else {
+                eprintln!(
+                    "[scratchpad-dnd] outbound prepare object={} has no provider",
+                    object.id
                 );
             }
         }
         provider
+    });
+
+    source.connect_drag_begin(|_, drag| {
+        if dnd_debug() {
+            eprintln!(
+                "[scratchpad-dnd] outbound drag-begin actions={:?}",
+                drag.actions()
+            );
+        }
+    });
+
+    source.connect_drag_end(|_, drag, delete_data| {
+        if dnd_debug() {
+            eprintln!(
+                "[scratchpad-dnd] outbound drag-end selected={:?} delete_data={}",
+                drag.selected_action(),
+                delete_data
+            );
+        }
     });
 
     widget.add_controller(source);
@@ -1335,10 +1388,11 @@ fn install_css() {
             background: rgba(115, 145, 255, 0.24);
         }
         .resize-handle {
-            background: transparent;
+            background: rgba(115, 145, 255, 0.10);
+            border-radius: 4px;
         }
         .resize-handle:hover {
-            background: rgba(115, 145, 255, 0.35);
+            background: rgba(115, 145, 255, 0.55);
         }
         .scratchpad-root:drop(active) .scratchpad-panel {
             background: #161a21;
