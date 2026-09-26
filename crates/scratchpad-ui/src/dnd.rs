@@ -14,9 +14,9 @@ enum DropKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OutboundFlavor {
-    Content,
-    Uri,
+enum OutboundFlavor {
+    Native,
+    Text,
 }
 
 pub fn install_inbound(
@@ -130,26 +130,37 @@ pub fn install_outbound<W: IsA<gtk::Widget>>(
     widget: &W,
     object: Object,
     panel: PanelController,
-    flavor: OutboundFlavor,
 ) {
     let source = gtk::DragSource::new();
     source.set_actions(gtk::gdk::DragAction::COPY);
 
-    source.connect_prepare(move |_, _, _| {
+    source.connect_prepare(move |source, _, _| {
+        // Pick one unambiguous representation at drag start. Normal drag uses
+        // the object's native/file-like form so file managers work naturally.
+        // Holding Ctrl *before starting the drag* forces semantic plain text,
+        // which avoids editors interpreting URLs as files.
+        let ctrl = source
+            .current_event_state()
+            .contains(gtk::gdk::ModifierType::CONTROL_MASK);
+        let flavor = choose_outbound_flavor(ctrl);
         let provider = drag_provider(&object, flavor);
+
         if dnd_debug() {
             match &provider {
                 Some(provider) => eprintln!(
-                    "[scratchpad-dnd] outbound prepare object={} flavor={flavor:?} formats={}",
+                    "[scratchpad-dnd] outbound prepare object={} ctrl={} flavor={flavor:?} formats={}",
                     object.id,
+                    ctrl,
                     provider.formats().to_str()
                 ),
                 None => eprintln!(
-                    "[scratchpad-dnd] outbound prepare object={} flavor={flavor:?} no-provider",
-                    object.id
+                    "[scratchpad-dnd] outbound prepare object={} ctrl={} flavor={flavor:?} no-provider",
+                    object.id,
+                    ctrl
                 ),
             }
         }
+
         provider
     });
 
@@ -401,18 +412,24 @@ fn object_from_uri(uri: &str) -> Option<Object> {
     )
 }
 
+fn choose_outbound_flavor(ctrl: bool) -> OutboundFlavor {
+    if ctrl {
+        OutboundFlavor::Text
+    } else {
+        OutboundFlavor::Native
+    }
+}
+
 fn drag_provider(
     object: &Object,
     flavor: OutboundFlavor,
 ) -> Option<gtk::gdk::ContentProvider> {
     match flavor {
-        OutboundFlavor::Content => match object.kind {
-            ObjectKind::Text | ObjectKind::Url => {
-                semantic_text(object).map(text_provider)
-            }
-            _ => uri_provider(object),
-        },
-        OutboundFlavor::Uri => uri_provider(object),
+        OutboundFlavor::Native => uri_provider(object)
+            .or_else(|| semantic_text(object).map(text_provider)),
+        OutboundFlavor::Text => semantic_text(object)
+            .map(text_provider)
+            .or_else(|| uri_provider(object)),
     }
 }
 
@@ -443,7 +460,9 @@ fn uri_provider(object: &Object) -> Option<gtk::gdk::ContentProvider> {
 }
 
 fn semantic_text(object: &Object) -> Option<String> {
-    full_text(object).or_else(|| primary_uri(object))
+    full_text(object)
+        .or_else(|| primary_uri(object))
+        .or_else(|| external_path(object))
 }
 
 fn bytes_provider(mime: &str, data: Vec<u8>) -> gtk::gdk::ContentProvider {
@@ -573,6 +592,18 @@ mod tests {
         assert_eq!(
             choose_final_action(DropKind::Text, gtk::gdk::DragAction::MOVE),
             gtk::gdk::DragAction::MOVE
+        );
+    }
+
+    #[test]
+    fn outbound_modifier_selects_one_representation() {
+        assert_eq!(
+            choose_outbound_flavor(false),
+            OutboundFlavor::Native
+        );
+        assert_eq!(
+            choose_outbound_flavor(true),
+            OutboundFlavor::Text
         );
     }
 }
